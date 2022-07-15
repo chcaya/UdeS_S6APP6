@@ -19,13 +19,10 @@ A_vec = 0.75*A_s
 
 g = 3.71
 U = 2
-r = 206.6 - 249.2*1e+9
+r = np.abs(206.6 - 249.2*1e+9)
 T_sun = 5780
 r_s = 0.696*1e+9
 sigma = 5.67*1e-8
-
-T_inf = 50
-wind = True
 
 
 def get_parameters(T_inf):
@@ -59,7 +56,7 @@ def get_Nu_from_R_e(R_e, P_r):
 
     return Nu
 
-def compute_dQ_loss(T_inf, T_b, wind, show):
+def compute_dQ_loss(T_inf, T_b, wind, vec_on, sw_on, show):
     k, C_p, rho, alpha, visc, P_r = get_parameters(T_inf)
 
     # Q_cond = k*A*(T_1 - T_2)/L
@@ -77,6 +74,7 @@ def compute_dQ_loss(T_inf, T_b, wind, show):
     for i in range(10):
         R_cond_s = x/(k_in*A_s)
 
+        Nu = None
         if wind:
             R_e = U*D/visc
             Nu = get_Nu_from_R_e(R_e, P_r)
@@ -90,14 +88,37 @@ def compute_dQ_loss(T_inf, T_b, wind, show):
 
         h_r_vec = sigma*epsilon_s_vec*(T_s + T_inf)*(T_s**2 + T_inf**2)
         R_rad_vec = 1/(h_r_vec*A_vec)
-
+            
         h_r_s = sigma*epsilon_s*(T_s + T_inf)*(T_s**2 + T_inf**2)
-        R_rad = 1/(h_r_s*(A_s - A_vec))
+        R_rad = 1/(h_r_s*(A_s - A_vec - A_cont - A_sw))
 
-        R_eq_ext = 1/(1/R_conv + 1/R_rad_vec + 1/R_rad)
-        T_s = (T_b - T_inf)*(R_eq_ext/(R_cond_s + R_eq_ext))
+        """
+        if vec_on:
+            R_eq_ext = 1/(1/R_conv + 1/R_rad_vec + 1/R_rad)
+        else:
+            R_eq_ext = 1/(1/R_conv + 1/R_rad)
+        """
 
-    R_eq = 1/(1/R_cond_sw + 1/R_cond_g + 1/(R_cond_s + R_eq_ext))
+        R_eq_ext = 0
+        if vec_on and sw_on:
+            R_eq_ext = 1/(1/R_cond_g + 1/R_cond_sw + 1/R_conv + 1/R_rad_vec + 1/R_rad)
+        elif vec_on and not sw_on:
+            R_eq_ext = 1/(1/R_cond_g + 1/R_conv + 1/R_rad_vec + 1/R_rad)
+        elif not vec_on and sw_on:
+            R_eq_ext = 1/(1/R_cond_g + 1/R_cond_sw + 1/R_conv + 1/R_rad)
+        elif not vec_on and not sw_on:
+            R_eq_ext = 1/(1/R_cond_g + 1/R_conv + 1/R_rad)
+
+        T_s = (T_b - T_inf)*(R_eq_ext/(R_cond_s + R_eq_ext)) + T_inf
+
+    """
+    if sw_on:
+        R_eq = 1/(1/R_cond_sw + 1/R_cond_g + 1/(R_cond_s + R_eq_ext))
+    else:
+        R_eq = 1/(1/R_cond_g + 1/(R_cond_s + R_eq_ext))
+    """
+
+    R_eq = R_cond_s + R_eq_ext
 
     dQ_loss = (T_b - T_inf)/R_eq
 
@@ -114,49 +135,77 @@ def compute_dQ_loss(T_inf, T_b, wind, show):
 
     return dQ_loss
 
-def compute_dQ_tot(T_inf, T_b, wind, show):
+def compute_dQ_tot(T_inf, T_b, wind, vec_on, sw_on, show):
     dQ_sun = sigma*epsilon_s*(A_s/2)*(r_s/r)**2*T_sun**4
     dQ_int = (1-mu_tot)*Q_fc
-    dQ_loss = compute_dQ_loss(T_inf, T_b, wind, show)
+    dQ_loss = compute_dQ_loss(T_inf, T_b, wind, vec_on, sw_on, False)
     dQ_tot = dQ_int + dQ_sun - dQ_loss
+    #dQ_tot = -dQ_loss
+
+    if show:
+        print("dQ_sun: " + str(dQ_sun))
+        print("dQ_int: " + str(dQ_int))
+        print("dQ_loss: " + str(dQ_loss))
+        print("dQ_tot: " + str(dQ_tot))
+
     return dQ_tot
 
 
-compute_dQ_loss(T_inf, 300, False, True)
-#compute_dQ_loss(250, False) #Hottest
-#compute_dQ_loss(50, True) #Coldest
+def compute_T_b():
+    time = 100
+    time_array = np.arange(0, time, 1)
+    T_b = 300
+    volume = (4*np.pi*(D_b/2)**3)/3
+    print("volume: " + str(volume))
+    Q_tot = np.zeros(time)
+    Q_tot[0] = rho_c_p_b*volume*T_b
+    #print("Q_tot[0]: " + str(Q_tot[0]))
+    T_b_array = np.zeros([2, time])
+    T_b_array[:, 0] = T_b
 
-time = 3600
-time_array = np.arange(0, time, 1)
-T_b = 300
-Q_tot = 0
-Q_tot = np.zeros(time)
-T_b_array = np.zeros([2, time])
-T_b_array = T_b_array + 300
-volume = (4*np.pi*(D_b/2)**3)/3
+    for i in range(2):
+        for j in range(1, time):
+            dQ_tot = None
+            if i == 0:
+                dQ_tot = compute_dQ_tot(50, T_b_array[i][j-1], True, False, False, True)
+            elif i == 1:
+                dQ_tot = compute_dQ_tot(250, T_b_array[i][j-1], False, True, True, False)
 
-for i in range(2):
-    for j in range(1, time):
-        dQ_tot = None
-        if i == 0:
-            dQ_tot = compute_dQ_tot(50, T_b_array[i][j], True, False)
-        elif i == 1:
-            dQ_tot = compute_dQ_tot(250, T_b_array[i][j], False, False)
+            Q_tot[j] = Q_tot[j-1] + dQ_tot
+            print("Q_tot: " + str(Q_tot[j]))
+            T_b_array[i][j] = T_b_array[i][j-1] + Q_tot[j]/(volume*rho_c_p_b) #Potentiellement ajouter le gaz a cela?
 
-        Q_tot[j] = Q_tot[j-1] + dQ_tot
-        T_b_array[i][j] = T_b_array[i][j-1] + Q_tot[j]/(volume*rho_c_p_b) #Potentiellement ajouter le gaz a cela?
+            if T_b_array[i][j] < 0:
+                T_b_array[i][j] = 0
+
+    return time_array, T_b_array
 
 
-fig, ax = plt.subplots()
+def plot_temperature(time_array, T_b_array):
+    fig, ax = plt.subplots()
 
-T_inf_array = np.array([50, 250])
-wind_array = np.array([True, False])
-for i in range(len(T_inf_array)):
-    ax.plot(time_array, T_b_array[i], label="T_inf: " + str(T_inf_array[i]) + " K and Wind: " + str(wind_array[i]))
-    ax.set_xlabel("Temps (s)")
-    ax.set_ylabel("Temperature (K)")
-    ax.set_title("Temperature du robot en fonction du temps")
+    T_inf_array = np.array([50, 250])
+    wind_array = np.array([True, False])
+    for i in range(len(T_inf_array)):
+        ax.plot(time_array, T_b_array[i], label="T_inf: " + str(T_inf_array[i]) + "K and Wind: " + str(wind_array[i]))
+        ax.set_xlabel("Temps (s)")
+        ax.set_ylabel("Temperature (K)")
+        ax.set_title("Temperature du robot en fonction du temps")
 
-ax.legend()
-ax.grid(True)
-plt.show()
+    ax.legend()
+    ax.grid(True)
+    plt.show()
+
+
+print("-----Cas 1-----")
+compute_dQ_loss(50, 300, False, True, True, True)
+print("-----Cas 2-----")
+compute_dQ_loss(50, 300, True, True, True, True)
+print("-----Cas 3-----")
+compute_dQ_loss(250, 300, False, True, True, True)
+print("-----Cas 4-----")
+compute_dQ_loss(250, 300, True, True, True, True)
+print()
+
+time_array, T_b_array = compute_T_b()
+plot_temperature(time_array, T_b_array)
